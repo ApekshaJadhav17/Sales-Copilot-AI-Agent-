@@ -1,4 +1,4 @@
-# 🧠 Sales Copilot — AI-Powered Sales Research Assistant (Local GenAI App)
+<img width="521" height="609" alt="image" src="https://github.com/user-attachments/assets/9c81f10b-7be8-426b-80b1-daa8b35115c3" /># 🧠 Sales Copilot — AI-Powered Sales Research Assistant (Local GenAI App)
 
 A privacy-first, full-stack Generative AI app that automates company and prospect research to generate pre-call briefings — powered entirely by local LLMs (via Ollama).
 
@@ -110,58 +110,11 @@ Optional vector DB integration for RAG (future upgrade)
 
 - **Frontend renders** → Output displayed as Markdown on a glass UI card.
 
-  sequenceDiagram
-  autonumber
-  participant U as User (Browser)
-  participant FE as React App
-  participant BE as FastAPI
-  participant OL as Ollama (127.0.0.1:11434)
-  participant M as Llama 3 (8B)
-
-  U->>FE: Paste text / URL / Upload PDF
-  FE->>BE: POST /api/... (JSON or multipart)
-  Note over BE: Validate (Pydantic), parse (Trafilatura/pypdf), build prompt
-  BE->>OL: POST /api/generate OR /api/chat (prompt, model)
-  OL->>M: Run inference locally
-  M-->>OL: Tokens/response
-  OL-->>BE: { response: "markdown..." }
-  BE-->>FE: { summary/report_md }
-  FE-->>U: Render Markdown in glass card
 
 
   ## Project Structure
-  sales-copilot/
-├── backend/
-│   ├── app/
-│   │   ├── main.py               # App entrypoint, routers & CORS
-│   │   ├── routes/
-│   │   │   ├── summarize.py      # /api/summarize — text summarizer
-│   │   │   ├── company.py        # /api/company/summary — web crawl + summarize
-│   │   │   ├── upload.py         # /api/prospect/upload — PDF → summary
-│   │   │   ├── report.py         # /api/report/precall — final report generator
-│   │   └── utils/ (optional)     # text cleaners, model helpers
-│   ├── .env                      # env vars (OLLAMA_BASE_URL, etc.)
-│   ├── requirements.txt          # backend dependencies
-│   └── Dockerfile
-│
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Home.tsx          # glassmorphism dashboard
-│   │   │   ├── Summarizer.tsx
-│   │   │   ├── Company.tsx
-│   │   │   ├── Prospect.tsx
-│   │   │   └── Report.tsx
-│   │   ├── lib/api.ts            # shared axios/fetch wrapper
-│   │   ├── App.tsx               # router + layout
-│   │   ├── main.tsx              # entrypoint w/ QueryClientProvider
-│   │   └── index.css             # Tailwind + base styles
-│   ├── vite.config.ts
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── Dockerfile
-│
-├── docker-compose.yml
-└── README.md (this file)
+  <img width="521" height="609" alt="image" src="https://github.com/user-attachments/assets/b5f6d5ce-b729-4631-a3ce-c3eb4443ecc6" />
+
+
 
 
