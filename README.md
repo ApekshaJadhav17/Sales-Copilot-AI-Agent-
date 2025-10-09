@@ -98,13 +98,13 @@ Optional vector DB integration for RAG (future upgrade)
 
 - **Processing** → FastAPI:
 
-  ***Cleans/crawls data (Trafilatura)***
+  ***1:Cleans/crawls data (Trafilatura)***
 
-  ***Parses PDFs (pypdf)***
+  ***2:Parses PDFs (pypdf)***
 
-  ***Builds structured prompts***
+  ***3:Builds structured prompts***
 
-  ***Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).***
+  ***4:Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).***
 
 - **Response** → LLM returns a summary or report.
 
