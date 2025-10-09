@@ -110,6 +110,25 @@ Optional vector DB integration for RAG (future upgrade)
 
 - **Frontend renders** → Output displayed as Markdown on a glass UI card.
 
+  sequenceDiagram
+  autonumber
+  participant U as User (Browser)
+  participant FE as React App
+  participant BE as FastAPI
+  participant OL as Ollama (127.0.0.1:11434)
+  participant M as Llama 3 (8B)
+
+  U->>FE: Paste text / URL / Upload PDF
+  FE->>BE: POST /api/... (JSON or multipart)
+  Note over BE: Validate (Pydantic), parse (Trafilatura/pypdf), build prompt
+  BE->>OL: POST /api/generate OR /api/chat (prompt, model)
+  OL->>M: Run inference locally
+  M-->>OL: Tokens/response
+  OL-->>BE: { response: "markdown..." }
+  BE-->>FE: { summary/report_md }
+  FE-->>U: Render Markdown in glass card
+
+
   ## Project Structure
   sales-copilot/
 ├── backend/
