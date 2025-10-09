@@ -47,6 +47,15 @@ Redis / PostgreSQL (planned) — caching & storage
 Docker — environment consistency
 
 
+### 🤖 AI / LLM Integration
+
+Ollama running Llama 3 locally (ollama serve)
+
+Prompt-based summarization, research & report generation
+
+Optional vector DB integration for RAG (future upgrade)
+
+
 ## Architecture 
                 ┌─────────────────────────────┐
                 │         React (Vite)        │
@@ -79,10 +88,24 @@ Docker — environment consistency
 
 
 
-### 🤖 AI / LLM Integration
 
-Ollama running Llama 3 locally (ollama serve)
 
-Prompt-based summarization, research & report generation
+## 🔁 Query Flow
 
-Optional vector DB integration for RAG (future upgrade)
+- **Frontend action** → User pastes text, enters a URL, or uploads a PDF.
+
+Request → React sends an HTTP request to FastAPI (/api/* endpoints).
+
+Processing → FastAPI:
+
+Cleans/crawls data (Trafilatura)
+
+Parses PDFs (pypdf)
+
+Builds structured prompts
+
+Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).
+
+Response → LLM returns a summary or report.
+
+Frontend renders → Output displayed as Markdown on a glass UI card.
