@@ -2,23 +2,23 @@
 
 A privacy-first, full-stack Generative AI app that automates company and prospect research to generate pre-call briefings — powered entirely by local LLMs (via Ollama).
 
-📘 Overview
+## 📘 Overview
 
 Sales Copilot is an intelligent sales enablement tool built with React (TypeScript) on the frontend and FastAPI (Python) on the backend.
 It uses a local LLM (Llama 3) via Ollama to summarize company websites, analyze LinkedIn profile PDFs, and compose detailed Pre-Call Reports — all running 100% locally, ensuring zero API cost and full data privacy.
 
 The MVP demonstrates an end-to-end AI workflow:
 
-Company Researcher → Crawl a company website and summarize it.
+**Company Researcher:** Crawl a company website and summarize it.
 
-Prospect Researcher → Extract text from LinkedIn profile PDFs or pasted content to generate personalized insights.
+**Prospect Researcher:** Extract text from LinkedIn profile PDFs or pasted content to generate personalized insights.
 
-Summarizer → Summarize any arbitrary text.
+**Summarizer:** Summarize any arbitrary text.
 
-Pre-Call Report → Combine company + prospect summaries into a polished, actionable briefing.
+**Pre-Call Report:** Combine company + prospect summaries into a polished, actionable briefing.
 
-⚙️ Tech Stack
-🧩 Frontend
+##⚙️ Tech Stack
+### 🧩 Frontend
 
 React 18 + TypeScript
 
@@ -30,7 +30,7 @@ React Query (@tanstack/react-query) for async state management
 
 React Markdown for rendering AI-generated markdown output
 
-🧠 Backend
+### 🧠 Backend
 
 FastAPI — lightweight async Python web framework
 
@@ -46,7 +46,7 @@ Redis / PostgreSQL (planned) — caching & storage
 
 Docker — environment consistency
 
-🤖 AI / LLM Integration
+### 🤖 AI / LLM Integration
 
 Ollama running Llama 3 locally (ollama serve)
 
