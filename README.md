@@ -109,3 +109,14 @@ Optional vector DB integration for RAG (future upgrade)
 - **Response** → LLM returns a summary or report.
 
 - **Frontend renders** → Output displayed as Markdown on a glass UI card.
+
+  ## System Architecture
+  | Layer                        | Description                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| **Frontend (UI)**            | Form inputs, result display, PDF upload; built with React + Tailwind CSS        |
+| **API Layer**                | FastAPI routes validating user data and orchestrating model requests            |
+| **Processing Layer**         | Handles web crawling (Trafilatura), PDF parsing (pypdf), text cleaning          |
+| **AI Layer (Ollama)**        | Local inference engine serving Llama 3; handles all natural language generation |
+| **Storage Layer (optional)** | Planned addition for Redis caching & Postgres history                           |
+| **Infrastructure**           | Docker Compose setup to run Ollama, backend, and frontend in isolated services  |
+
