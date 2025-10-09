@@ -153,7 +153,7 @@ Potential pain points
 
 Personalized outreach hooks
 
-###🧾 Pre-Call Report Generator
+### 🧾 Pre-Call Report Generator
 
 Combines company + prospect summaries.
 
