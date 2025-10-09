@@ -254,23 +254,24 @@ Vector DB (RAG)	Store embeddings for semantic search across companies/prospects.
 Streaming UI	Implement SSE-based streaming for token-by-token output.
 Export to PDF	Generate branded, printable PDF reports.
 Authentication	Add user login for team-based use.
-🛠️ Local Setup Summary
-# 1. Install Ollama and Llama3 model
+
+## 🛠️ Local Setup Summary
+### 1. Install Ollama and Llama3 model
 brew install ollama
 ollama pull llama3:8b
 
-# 2. Backend setup
+### 2. Backend setup
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
-# 3. Frontend setup
+### 3. Frontend setup
 cd ../frontend
 npm install
 npm run dev
 
-# 4. Test full flow
+### 4. Test full flow
 ollama serve  # in separate terminal
 open http://localhost:5173
 
@@ -279,7 +280,7 @@ open http://localhost:5173
 ### → HTTP request to Ollama → Llama3 generates → FastAPI sends back JSON →
 ### → React renders Markdown result in glass card
 
-##🏁 Summary
+## 🏁 Summary
 
 Sales Copilot is a full-stack demonstration of a local Generative AI product —
 it’s private, fast, and modular, showing mastery of frontend, backend, and LLM orchestration.
