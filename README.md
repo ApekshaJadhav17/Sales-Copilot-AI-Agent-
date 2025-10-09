@@ -110,13 +110,39 @@ Optional vector DB integration for RAG (future upgrade)
 
 - **Frontend renders** → Output displayed as Markdown on a glass UI card.
 
-  ## System Architecture
-  | Layer                        | Description                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------- |
-| **Frontend (UI)**            | Form inputs, result display, PDF upload; built with React + Tailwind CSS        |
-| **API Layer**                | FastAPI routes validating user data and orchestrating model requests            |
-| **Processing Layer**         | Handles web crawling (Trafilatura), PDF parsing (pypdf), text cleaning          |
-| **AI Layer (Ollama)**        | Local inference engine serving Llama 3; handles all natural language generation |
-| **Storage Layer (optional)** | Planned addition for Redis caching & Postgres history                           |
-| **Infrastructure**           | Docker Compose setup to run Ollama, backend, and frontend in isolated services  |
+  ## Project Structure
+  sales-copilot/
+├── backend/
+│   ├── app/
+│   │   ├── main.py               # App entrypoint, routers & CORS
+│   │   ├── routes/
+│   │   │   ├── summarize.py      # /api/summarize — text summarizer
+│   │   │   ├── company.py        # /api/company/summary — web crawl + summarize
+│   │   │   ├── upload.py         # /api/prospect/upload — PDF → summary
+│   │   │   ├── report.py         # /api/report/precall — final report generator
+│   │   └── utils/ (optional)     # text cleaners, model helpers
+│   ├── .env                      # env vars (OLLAMA_BASE_URL, etc.)
+│   ├── requirements.txt          # backend dependencies
+│   └── Dockerfile
+│
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Home.tsx          # glassmorphism dashboard
+│   │   │   ├── Summarizer.tsx
+│   │   │   ├── Company.tsx
+│   │   │   ├── Prospect.tsx
+│   │   │   └── Report.tsx
+│   │   ├── lib/api.ts            # shared axios/fetch wrapper
+│   │   ├── App.tsx               # router + layout
+│   │   ├── main.tsx              # entrypoint w/ QueryClientProvider
+│   │   └── index.css             # Tailwind + base styles
+│   ├── vite.config.ts
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── Dockerfile
+│
+├── docker-compose.yml
+└── README.md (this file)
+
 
