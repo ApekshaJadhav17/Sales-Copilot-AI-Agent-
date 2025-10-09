@@ -94,18 +94,18 @@ Optional vector DB integration for RAG (future upgrade)
 
 - **Frontend action** → User pastes text, enters a URL, or uploads a PDF.
 
-Request → React sends an HTTP request to FastAPI (/api/* endpoints).
+- **Request**  → React sends an HTTP request to FastAPI (/api/* endpoints).
 
-Processing → FastAPI:
+- **Processing** → FastAPI:
 
-Cleans/crawls data (Trafilatura)
+  ***Cleans/crawls data (Trafilatura)***
 
-Parses PDFs (pypdf)
+***Parses PDFs (pypdf)***
 
-Builds structured prompts
+***Builds structured prompts***
 
-Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).
+***Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).***
 
-Response → LLM returns a summary or report.
+- **Response** → LLM returns a summary or report.
 
-Frontend renders → Output displayed as Markdown on a glass UI card.
+- **Frontend renders** → Output displayed as Markdown on a glass UI card.
