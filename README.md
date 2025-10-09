@@ -44,6 +44,37 @@ pypdf — PDF text extraction
 
 Redis / PostgreSQL (planned) — caching & storage
 
+## Architecture 
+                ┌─────────────────────────────┐
+                │         React (Vite)        │
+                │  Summarizer / Company /     │
+                │  Prospect / Report UI       │
+                └─────────────┬───────────────┘
+                              │  JSON (REST)
+                              ▼
+                 ┌────────────────────────────┐
+                 │         FastAPI API        │
+                 │  /api/summarize            │
+                 │  /api/company/summary      │
+                 │  /api/prospect/upload      │
+                 │  /api/report/precall       │
+                 └─────────────┬──────────────┘
+                               │  HTTP calls via httpx
+                               ▼
+                  ┌────────────────────────────┐
+                  │          Ollama            │
+                  │   Local Llama 3 model      │
+                  │   127.0.0.1:11434          │
+                  └─────────────┬──────────────┘
+                                │
+                                ▼
+                     ┌────────────────────┐
+                     │   AI Generation    │
+                     │ Summaries, Hooks,  │
+                     │ Talking Points     │
+                     └────────────────────┘
+
+
 Docker — environment consistency
 
 ### 🤖 AI / LLM Integration
