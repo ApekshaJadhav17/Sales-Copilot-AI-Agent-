@@ -1,4 +1,4 @@
-🧠 Sales Copilot — AI-Powered Sales Research Assistant (Local GenAI App)
+# 🧠 Sales Copilot — AI-Powered Sales Research Assistant (Local GenAI App)
 
 A privacy-first, full-stack Generative AI app that automates company and prospect research to generate pre-call briefings — powered entirely by local LLMs (via Ollama).
 
