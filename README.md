@@ -44,6 +44,9 @@ pypdf — PDF text extraction
 
 Redis / PostgreSQL (planned) — caching & storage
 
+Docker — environment consistency
+
+
 ## Architecture 
                 ┌─────────────────────────────┐
                 │         React (Vite)        │
@@ -75,7 +78,6 @@ Redis / PostgreSQL (planned) — caching & storage
                      └────────────────────┘
 
 
-Docker — environment consistency
 
 ### 🤖 AI / LLM Integration
 
