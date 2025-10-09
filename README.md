@@ -17,7 +17,7 @@ The MVP demonstrates an end-to-end AI workflow:
 
 **Pre-Call Report:** Combine company + prospect summaries into a polished, actionable briefing.
 
-##⚙️ Tech Stack
+## ⚙️ Tech Stack
 ### 🧩 Frontend
 
 React 18 + TypeScript
