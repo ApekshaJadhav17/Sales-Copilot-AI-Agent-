@@ -100,11 +100,11 @@ Optional vector DB integration for RAG (future upgrade)
 
   ***Cleans/crawls data (Trafilatura)***
 
-***Parses PDFs (pypdf)***
+  ***Parses PDFs (pypdf)***
 
-***Builds structured prompts***
+  ***Builds structured prompts***
 
-***Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).***
+  ***Calls the local LLM via httpx → Ollama REST API (/api/generate or /api/chat).***
 
 - **Response** → LLM returns a summary or report.
 
