@@ -2,6 +2,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import httpx, os
 
+from app.db import get_session
+from app.crud import create_run
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
+
 router = APIRouter()
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instrcut")
@@ -13,7 +18,8 @@ class SummarizeBody(BaseModel):
 
 @router.post("/summarize")
 
-async def summarize(body: SummarizeBody):
+# async def summarize(body: SummarizeBody):
+async def summarize(body: SummarizeBody, db: AsyncSession = Depends(get_session)):
     prompt = (
         f"Summarize the following text in {body.bullets} bullet points. "
         "Be concise and factual.\n\n" + body.text
@@ -69,4 +75,11 @@ async def summarize(body: SummarizeBody):
     summary = (data.get("response") or data.get("message", {}).get("content") or "").strip()
     if not summary:
         raise HTTPException(status_code=502, detail="Model returned an empty response.")
+    # return {"summary": summary}
+
+    # await create_run(db, run_type="summarize", input_text=body.text[:20000], output_text=summary, source=None)
+    try:
+        await create_run(db, run_type="summarize", input_text=body.text[:20000], output_text=summary, source=None)
+    except Exception as e:
+        print("Warning: persist failed (summarize):", e)
     return {"summary": summary}

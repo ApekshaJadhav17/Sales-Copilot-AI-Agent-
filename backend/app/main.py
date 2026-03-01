@@ -13,6 +13,17 @@ from app.routes.upload import router as upload_router
 
 from app.routes.report import router as report_router
 
+from app.routes.history import router as history_router
+
+from app.routes.ingest import router as ingest_router
+
+from app.routes.ingest_read import router as ingest_read_router
+
+from app.routes.embed import router as embed_router
+
+from app.routes.search import router as search_router
+
+from app.routes.pinecone_search import router as pinecone_search_router
 
 
 
@@ -38,3 +49,14 @@ app.include_router(company_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
 
+app.include_router(history_router, prefix="/api")
+
+app.include_router(ingest_router, prefix="/api")
+
+app.include_router(ingest_read_router, prefix="/api")
+
+app.include_router(embed_router, prefix="/api")
+
+app.include_router(search_router, prefix="/api")
+
+app.include_router(pinecone_search_router, prefix="/api")
