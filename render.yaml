@@ -47,7 +47,6 @@ services:
   - type: web
     name: sales-copilot-frontend
     runtime: static
-    plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
