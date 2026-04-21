@@ -1,461 +1,177 @@
 # backend/app/routes/company.py
-from fastapi import APIRouter, HTTPException, Depends
+"""
+POST /api/company/summary
+
+Crawls a company website, extracts readable text, and streams an LLM-generated
+summary as Server-Sent Events.
+
+No RAG here — a single homepage is ~3-5k tokens, well within the 128k context
+window. Sending the full text gives the LLM more signal than chunked retrieval.
+
+SSE event sequence:
+  status  "Fetching website..."
+  status  "Analysing..."
+  meta    {"session_id": N, "source_id": N}
+  token   ... (LLM tokens)
+  done
+"""
+from __future__ import annotations
+
+import trafilatura
+import httpx
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
-import httpx, trafilatura, os
-import numpy as np
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session
-from app.crud import create_run
-from app.models import Source, Chunk
-from app.services.embeddings import embed_texts
-
-# Pinecone helper
-from app.services.vector_store import query_similar_chunks
-
-# embed core (ensures postgres embeddings + upsert logic)
-from app.routes.embed import embed_source_chunks_core
+from app.crud import create_session as crud_create_session, upsert_company_research
+from app.db import get_session as get_db_session
+from app.models import Source, User
+from app.services.auth import get_optional_user
+from app.services.cache import cache
+from app.services.llm import stream_completion
+from app.services.sse import sse_done, sse_error, sse_meta, sse_status, sse_token
 
 router = APIRouter()
 
-OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
 
 
 class Body(BaseModel):
-    url: HttpUrl
+    url:     HttpUrl
     bullets: int = 6
-    debug: bool = False
 
 
-def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120) -> list[str]:
-    text = (text or "").strip()
-    if not text:
-        return []
-    chunks: list[str] = []
-    start = 0
-    n = len(text)
-    while start < n:
-        end = min(start + chunk_size, n)
-        chunks.append(text[start:end])
-        if end == n:
-            break
-        start = max(0, end - overlap)
-    return chunks
+_PROMPT = """\
+Summarize this company's website in {bullets} concise bullet points.
+
+Cover: what they do, their ideal customer profile (ICP), key products or services, \
+pricing signals (if any), tech stack signals, and any recent strategic notes.
+
+Be specific — avoid generic statements like "they are a leading company."
+
+COMPANY URL: {url}
+
+WEBSITE CONTENT:
+{context}
+"""
 
 
-async def get_or_create_source(db: AsyncSession, url: str, raw_text: str) -> Source:
+async def _get_or_create_source(db: AsyncSession, url: str, raw_text: str) -> Source:
     res = await db.execute(select(Source).where(Source.url == url).limit(1))
     existing = res.scalar_one_or_none()
     if existing:
         return existing
-
-    s = Source(url=url, raw_text=(raw_text or "")[:200000])
-    db.add(s)
+    source = Source(url=url, raw_text=raw_text[:200_000])
+    db.add(source)
     await db.flush()
-    return s
-
-
-async def get_chunks_for_source(db: AsyncSession, source_id: int) -> list[Chunk]:
-    res = await db.execute(
-        select(Chunk)
-        .where(Chunk.source_id == source_id)
-        .order_by(Chunk.chunk_index.asc())
-    )
-    return list(res.scalars().all())
+    await db.commit()
+    return source
 
 
 @router.post("/company/summary")
-async def company_summary(body: Body, db: AsyncSession = Depends(get_session)):
+async def company_summary(
+    body: Body,
+    db: AsyncSession = Depends(get_db_session),
+    user: User | None = Depends(get_optional_user),
+):
     url = str(body.url)
 
-    # 1) Fetch page
-    try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(30.0, connect=30.0),
-            headers={"User-Agent": "Mozilla/5.0 (SalesCopilot/0.1)"},
-        ) as c:
-            r = await c.get(url)
-            r.raise_for_status()
-            html = r.text
-    except httpx.ConnectError as e:
-        raise HTTPException(503, f"Could not reach target URL. {repr(e)}")
-    except httpx.ReadTimeout:
-        raise HTTPException(504, "Timed out while fetching the page.")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(400, f"Error fetching page: {e.response.status_code}")
-    except httpx.RequestError as e:
-        raise HTTPException(503, f"Request error while fetching page: {repr(e)}")
+    async def generate():
+        # ── 1. Fetch (with Redis cache, 24 h TTL) ─────────────────────────────
+        _cache_key = f"company_text:{url}"
+        yield sse_status("Fetching company website...")
 
-    # 2) Extract readable text
-    text = trafilatura.extract(html, favor_recall=True) or ""
-    if not text.strip():
-        raise HTTPException(400, "Could not extract readable text from page")
+        text = await cache.get(_cache_key)
+        if text:
+            yield sse_status("Analysing company (cached)...")
+        else:
+            try:
+                async with httpx.AsyncClient(
+                    follow_redirects=True,
+                    timeout=httpx.Timeout(30.0, connect=15.0),
+                    headers=_HEADERS,
+                ) as client:
+                    r = await client.get(url)
+                    r.raise_for_status()
+                    html = r.text
+            except httpx.ConnectError:
+                yield sse_error(f"Could not reach {url}. Check the URL and try again.")
+                return
+            except httpx.ReadTimeout:
+                yield sse_error("The page took too long to respond.")
+                return
+            except httpx.HTTPStatusError as exc:
+                yield sse_error(f"HTTP {exc.response.status_code} while fetching the page.")
+                return
+            except Exception as exc:
+                yield sse_error(f"Fetch failed: {repr(exc)}")
+                return
 
-    # 3) Store source + chunks, then embed via embed core and retrieve via Pinecone
-    source = None
-    context = text[:12000]
+            # ── 2. Extract readable text ──────────────────────────────────────
+            text = trafilatura.extract(html, favor_recall=True) or ""
+            if not text.strip():
+                yield sse_error("Could not extract readable text from this page.")
+                return
 
-    try:
-        source = await get_or_create_source(db, url=url, raw_text=text)
+            await cache.set(_cache_key, text, ttl=86_400)  # 24 h
 
-        chunks = await get_chunks_for_source(db, source.id)
-        if not chunks:
-            pieces = chunk_text(text, chunk_size=900, overlap=120)
-            for i, ch in enumerate(pieces):
-                db.add(Chunk(source_id=source.id, chunk_index=i, chunk_text=ch[:5000]))
-            await db.commit()
-            chunks = await get_chunks_for_source(db, source.id)
+        yield sse_status("Analysing company...")
 
-        # Ensure embeddings + upsert to Pinecone (non-blocking best-effort inside)
+        # ── 3. Persist Source + Session (best-effort) ─────────────────────────
+        session_id: int | None = None
+        source_id:  int | None = None
         try:
-            await embed_source_chunks_core(db, source.id, force=False)
-        except Exception as e:
-            print("Warning: embed_core failed for company summary:", repr(e))
+            source  = await _get_or_create_source(db, url, text)
+            session = await crud_create_session(db, company_url=url, user_id=user.id if user else None)
+            session_id = session.id
+            source_id  = source.id
+        except Exception as exc:
+            print(f"[company] Session/source persist warning: {repr(exc)}")
 
-        # Retrieval via Pinecone
-        retrieval_query = (
-            "Summarize the company: what they do, ideal customer profile (ICP), "
-            "products/offerings, any recent strategic notes/news, and tech stack signals."
+        # ── 4. Metadata event ─────────────────────────────────────────────────
+        yield sse_meta({"session_id": session_id, "source_id": source_id})
+
+        # ── 5. Build prompt ───────────────────────────────────────────────────
+        prompt = _PROMPT.format(
+            bullets=body.bullets,
+            url=url,
+            context=text[:12_000],
         )
+
+        # ── 6. Stream LLM tokens ──────────────────────────────────────────────
+        full_text: list[str] = []
         try:
-            qv = embed_texts([retrieval_query])[0]
-            matches = query_similar_chunks(query_vector=qv, top_k=5, source_id=source.id)
-            top_chunks = [m.get("metadata", {}).get("chunk_text", "") for m in matches]
-            if top_chunks and any(top_chunks):
-                context = "\n\n---\n\n".join(top_chunks)[:12000]
-            else:
-                context = text[:12000]
-        except Exception as e:
-            print("Warning: Pinecone query failed for company summary:", repr(e))
-            context = text[:12000]
-
-    except Exception as e:
-        print("Warning: company RAG prep failed, falling back to raw text:", repr(e))
-        context = text[:12000]
-
-    # 4) Prompt → Ollama
-    prompt = (
-        f"Summarize this company's website in {body.bullets} concise bullets. "
-        "Focus on what they do, ICP, products, recent strategic notes/news, and tech stack signals.\n\n"
-        f"CONTEXT:\n{context}"
-    )
-
-    async with httpx.AsyncClient(timeout=120) as c:
-        r = await c.post(
-            f"{OLLAMA_BASE}/api/generate",
-            json={"model": MODEL, "prompt": prompt, "stream": False},
-        )
-        if r.status_code == 404:
-            r = await c.post(
-                f"{OLLAMA_BASE}/api/chat",
-                json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False},
-            )
-        r.raise_for_status()
-        data = r.json()
-
-    summary = (data.get("response") or data.get("message", {}).get("content") or "").strip()
-
-    # 5) Persist run (don’t fail the request if DB write fails)
-    try:
-        await create_run(
-            db,
-            run_type="company_summary_rag",
-            input_text=context[:20000],
-            output_text=summary,
-            source=url,
-        )
-    except Exception as e:
-        print("Warning: persist failed (company_summary_rag):", repr(e))
-
-    resp = {"summary": summary, "source": url}
-    if body.debug:
-        resp["rag"] = {
-            "source_id": (source.id if source else None),
-            "context_preview": context[:600],
-        }
-    return resp
-
-
-# # backend/app/routes/company.py
-
-# from fastapi import APIRouter, HTTPException, Depends
-# from pydantic import BaseModel, HttpUrl
-# import httpx, trafilatura, os
-# import numpy as np
-# from sqlalchemy.ext.asyncio import AsyncSession
-# from sqlalchemy import select
-
-# from app.db import get_session
-# from app.crud import create_run
-# from app.models import Source, Chunk
-# from app.services.embeddings import embed_texts
-
-# from app.services.vector_store import upsert_chunk_embeddings
-
-# router = APIRouter()
-
-# OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-# MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
-
-
-# class Body(BaseModel):
-#     url: HttpUrl
-#     bullets: int = 6
-#     debug: bool = False
-
-
-# def cosine(a: np.ndarray, b: np.ndarray) -> float:
-#     # embeddings are normalized -> cosine == dot product
-#     return float(np.dot(a, b))
-
-
-# def chunk_text(text: str, chunk_size: int = 900, overlap: int = 120) -> list[str]:
-#     text = (text or "").strip()
-#     if not text:
-#         return []
-#     chunks: list[str] = []
-#     start = 0
-#     n = len(text)
-#     while start < n:
-#         end = min(start + chunk_size, n)
-#         chunks.append(text[start:end])
-#         if end == n:
-#             break
-#         start = max(0, end - overlap)
-#     return chunks
-
-
-# async def get_or_create_source(db: AsyncSession, url: str, raw_text: str) -> Source:
-#     res = await db.execute(select(Source).where(Source.url == url).limit(1))
-#     existing = res.scalar_one_or_none()
-#     if existing:
-#         return existing
-
-#     s = Source(url=url, raw_text=(raw_text or "")[:200000])
-#     db.add(s)
-#     await db.flush()  # assigns s.id
-#     return s
-
-
-# async def get_chunks_for_source(db: AsyncSession, source_id: int) -> list[Chunk]:
-#     res = await db.execute(
-#         select(Chunk)
-#         .where(Chunk.source_id == source_id)
-#         .order_by(Chunk.chunk_index.asc())
-#     )
-#     return list(res.scalars().all())
-
-
-# # async def ensure_embeddings(db: AsyncSession, chunks: list[Chunk]) -> int:
-# #     missing = [c for c in chunks if not getattr(c, "embedding", None)]
-# #     if not missing:
-# #         return 0
-
-# #     vecs = embed_texts([c.chunk_text for c in missing])
-
-# #     #for pincone upsert
-
-
-# # # after computing vecs = embed_texts([...])
-# #     items = []
-# #     for c, v in zip(missing, vecs):
-# #       c.embedding = v
-# #       items.append({
-# #         "id": f"chunk:{c.id}",          # pinecone vector id
-# #         "values": v,
-# #         "metadata": {
-# #         "chunk_id": c.id,
-# #         "source_id": c.source_id,
-# #         "chunk_index": c.chunk_index,
-# #         "chunk_text": c.chunk_text[:1000],
-# #         }
-# #     })
-
-# #     await db.commit()
-# #     upsert_chunk_embeddings(items)
-# #     for c, v in zip(missing, vecs):
-# #       c.embedding = v
-
-# #     await db.commit()
-# #     return len(missing)
-
-
-# async def ensure_embeddings(db: AsyncSession, chunks: list[Chunk]) -> int:
-#     missing = [c for c in chunks if not getattr(c, "embedding", None)]
-#     if not missing:
-#         return 0
-
-#     vecs = embed_texts([c.chunk_text for c in missing])
-
-#     # 1) Save embeddings to Postgres
-#     for c, v in zip(missing, vecs):
-#         c.embedding = v
-
-#     await db.commit()  # commit once
-
-#     # 2) Upsert to Pinecone (best-effort; don't fail request if Pinecone is down)
-#     try:
-#         from app.services.vector_store import upsert_chunk_embeddings
-
-#         items = []
-#         for c, v in zip(missing, vecs):
-#             items.append(
-#                 {
-#                     "id": f"chunk:{c.id}",  # pinecone vector id
-#                     "values": v,
-#                     "metadata": {
-#                         "chunk_id": c.id,
-#                         "source_id": c.source_id,
-#                         "chunk_index": c.chunk_index,
-#                         "chunk_text": c.chunk_text[:1000],
-#                     },
-#                 }
-#             )
-
-#         upsert_chunk_embeddings(items)
-
-#     except Exception as e:
-#         print("Warning: Pinecone upsert failed:", repr(e))
-
-#     return len(missing)
-
-
-# async def retrieve_top_chunks(
-#     db: AsyncSession, query: str, source_id: int, top_k: int = 5
-# ) -> list[str]:
-#     res = await db.execute(
-#         select(Chunk).where(
-#             Chunk.source_id == source_id,
-#             Chunk.embedding.is_not(None),
-#         )
-#     )
-#     chunks = list(res.scalars().all())
-#     if not chunks:
-#         return []
-
-#     qv = np.array(embed_texts([query])[0], dtype=float)
-
-#     scored: list[tuple[float, Chunk]] = []
-#     for c in chunks:
-#         v = np.array(c.embedding, dtype=float)
-#         scored.append((cosine(qv, v), c))
-
-#     scored.sort(key=lambda x: x[0], reverse=True)
-#     top = scored[: max(1, min(top_k, 20))]
-
-#     return [c.chunk_text for score, c in top]
-
-
-# @router.post("/company/summary")
-# async def company_summary(body: Body, db: AsyncSession = Depends(get_session)):
-#     url = str(body.url)
-
-#     # 1) Fetch page
-#     try:
-#         async with httpx.AsyncClient(
-#             follow_redirects=True,
-#             timeout=httpx.Timeout(30.0, connect=30.0),
-#             headers={"User-Agent": "Mozilla/5.0 (SalesCopilot/0.1)"},
-#         ) as c:
-#             r = await c.get(url)
-#             r.raise_for_status()
-#             html = r.text
-#     except httpx.ConnectError as e:
-#         raise HTTPException(503, f"Could not reach target URL. {repr(e)}")
-#     except httpx.ReadTimeout:
-#         raise HTTPException(504, "Timed out while fetching the page.")
-#     except httpx.HTTPStatusError as e:
-#         raise HTTPException(400, f"Error fetching page: {e.response.status_code}")
-#     except httpx.RequestError as e:
-#         raise HTTPException(503, f"Request error while fetching page: {repr(e)}")
-
-#     # 2) Extract readable text
-#     text = trafilatura.extract(html, favor_recall=True) or ""
-#     if not text.strip():
-#         raise HTTPException(400, "Could not extract readable text from page")
-
-#     # 3) RAG: store source + chunks, embed if needed, retrieve top chunks
-#     try:
-#         source = await get_or_create_source(db, url=url, raw_text=text)
-
-#         chunks = await get_chunks_for_source(db, source.id)
-#         if not chunks:
-#             pieces = chunk_text(text, chunk_size=900, overlap=120)
-#             for i, ch in enumerate(pieces):
-#                 db.add(
-#                     Chunk(
-#                         source_id=source.id,
-#                         chunk_index=i,
-#                         chunk_text=ch[:5000],
-#                     )
-#                 )
-#             await db.commit()
-#             chunks = await get_chunks_for_source(db, source.id)
-
-#         await ensure_embeddings(db, chunks)
-
-#         retrieval_query = (
-#             "Summarize the company: what they do, ideal customer profile (ICP), "
-#             "products/offerings, any recent strategic notes/news, and tech stack signals."
-#         )
-#         top_chunks = await retrieve_top_chunks(
-#             db, retrieval_query, source_id=source.id, top_k=5
-#         )
-#         context = "\n\n---\n\n".join(top_chunks)[:12000]
-
-#     except Exception as e:
-#         # If anything in RAG prep fails, fall back to raw text (still return a summary)
-#         print("Warning: RAG prep failed, falling back to raw text:", repr(e))
-#         context = text[:12000]
-
-#     # 4) Prompt → Ollama
-#     prompt = (
-#         f"Summarize this company's website in {body.bullets} concise bullets. "
-#         "Focus on what they do, ICP, products, recent strategic notes/news, and tech stack signals.\n\n"
-#         f"CONTEXT:\n{context}"
-#     )
-
-#     async with httpx.AsyncClient(timeout=120) as c:
-#         r = await c.post(
-#             f"{OLLAMA_BASE}/api/generate",
-#             json={"model": MODEL, "prompt": prompt, "stream": False},
-#         )
-#         if r.status_code == 404:
-#             r = await c.post(
-#                 f"{OLLAMA_BASE}/api/chat",
-#                 json={
-#                     "model": MODEL,
-#                     "messages": [{"role": "user", "content": prompt}],
-#                     "stream": False,
-#                 },
-#             )
-#         r.raise_for_status()
-#         data = r.json()
-
-#     summary = (data.get("response") or data.get("message", {}).get("content") or "").strip()
-
-#     # 5) Persist run (don’t fail the request if DB write fails)
-#     try:
-#         await create_run(
-#             db,
-#             run_type="company_summary_rag",
-#             input_text=context[:20000],
-#             output_text=summary,
-#             source=url,
-#         )
-#     except Exception as e:
-#         print("Warning: persist failed (company_summary_rag):", e)
-
-#     # return {"summary": summary, "source": url}
-#     resp = {"summary": summary, "source": url}
-
-#     if body.debug:
-#       resp["rag"] = {
-#         "source_id": source.id if "source" in locals() else None,
-#         "context_preview": context[:600],
-#       }
-
-#     return resp
+            async for token in stream_completion(prompt):
+                full_text.append(token)
+                yield sse_token(token)
+        except RuntimeError as exc:
+            yield sse_error(str(exc))
+            return
+        except Exception as exc:
+            yield sse_error(f"LLM error: {repr(exc)}")
+            return
+
+        # ── 7. Persist generated summary (after stream) ───────────────────────
+        if session_id and full_text:
+            try:
+                await upsert_company_research(
+                    db,
+                    session_id,
+                    raw_text=text[:50_000],
+                    summary="".join(full_text),
+                    source_id=source_id,
+                )
+            except Exception as exc:
+                print(f"[company] Summary persist warning: {repr(exc)}")
+
+        yield sse_done()
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
