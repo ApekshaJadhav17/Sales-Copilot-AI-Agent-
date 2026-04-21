@@ -47,7 +47,6 @@ services:
   - type: web
     name: sales-copilot-frontend
     runtime: static
-    region: oregon
     plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
